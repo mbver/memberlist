@@ -1686,11 +1686,14 @@ func TestAdvertiseAddr(t *testing.T) {
 }
 
 type MockConflict struct {
+	lock     sync.Mutex
 	existing *Node
 	other    *Node
 }
 
 func (m *MockConflict) NotifyConflict(existing, other *Node) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	m.existing = existing
 	m.other = other
 }
@@ -1715,12 +1718,17 @@ func TestMemberlist_conflictDelegate(t *testing.T) {
 	require.NoError(t, err)
 	defer m2.Shutdown()
 
+	// NotifyConflict is called on current thread so there's no data race
+	// but if we call m2.Join m1, then NotifyConflict is called on another thread
+	// in that case, mock conflict must have a lock
 	num, err := m1.Join([]string{c2.Name + "/" + c2.BindAddr})
 	require.NoError(t, err)
 	require.Equal(t, 1, num)
 
 	yield()
 
+	mock.lock.Lock()
+	defer mock.lock.Unlock()
 	// Ensure we were notified
 	if mock.existing == nil || mock.other == nil {
 		t.Fatalf("should get notified mock.existing=%v  VS mock.other=%v", mock.existing, mock.other)
